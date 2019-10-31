@@ -1,0 +1,180 @@
+<?php
+
+/**
+ * @file
+ * Main module file for the Paragraphs Library module.
+ */
+
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Entity\EntityFormInterface;
+use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
+use Composer\Installers\TheliaInstaller;
+use Drupal\field\Entity\FieldConfig;
+use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\Core\Config\Entity\ConfigEntityInterface;
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\node\Entity\NodeType;
+
+/**
+ * Implementation of hook_entity_field_access().
+ */
+function entity_edit_lock_entity_field_access($operation, FieldDefinitionInterface $field_definition, AccountInterface $account, FieldItemListInterface $items = NULL) {
+  if ($field_definition->getName() == 'entity_edit_lock_locked') {
+    $bundle = $field_definition->getTargetBundle();
+    $entity_type_id = $field_definition->getTargetEntityTypeId();
+
+    if (!$account->hasPermission("lock $bundle $entity_type_id")) {
+      return AccessResult::forbidden();
+    }
+  }
+
+  return AccessResult::neutral();
+}
+
+/**
+ * Implementation of hook_entity_access();
+ */
+function entity_edit_lock_entity_access(EntityInterface $entity, $operation, AccountInterface $account) {
+  if ($entity instanceof FieldableEntityInterface && $entity->hasField('entity_edit_lock_locked') && $entity->entity_edit_lock_locked->value) {
+    // This is a locked entity.
+    $bundle         = $entity->bundle();
+    $entity_type_id = $entity->getEntityTypeId();
+
+    switch ($operation) {
+      case 'create':
+        // This should not happen, but we need to make sure someone cannot
+        // create a locked paragraph without permission to perform the lock.
+        if (!$account->hasPermission("lock $bundle $entity_type_id")) {
+          return AccessResult::forbidden();
+        }
+        break;
+      case 'update':
+        if (!$account->hasPermission("edit locked $bundle $entity_type_id")) {
+          return AccessResult::forbidden();
+        }
+        break;
+      case 'delete':
+        if (!$account->hasPermission("delete locked $bundle $entity_type_id")) {
+          return AccessResult::forbidden();
+        }
+        break;
+    }
+
+    return AccessResult::neutral();
+  }
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function entity_edit_lock_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  // Maybe there is a way to tell if a form is an entity type form or a bundle
+  // form and therefor should include our settings. For now we will add it to
+  // these forms.
+  $known_entity_type_form_ids = [
+    'node_type_edit_form',
+    'node_type_add_form',
+    'paragraphs_type_add_form',
+    'paragraphs_type_edit_form',
+    'eck_entity_type_add_form',
+    'eck_entity_type_edit_form',
+  ];
+
+  if (in_array($form_id, $known_entity_type_form_ids)) {
+    entity_edit_lock_add_lock_setting_to_form($form, $form_state);
+  }
+}
+
+/**
+ * Add a setting to an entity type or bundle form to permit locking.
+ *
+ * @param array $form
+ *   The form.
+ *
+ * @param FormStateInterface $form_state
+ *   The form object must be an entity form and the entity must implement the
+ *   ThirdPartySettingsInterface.
+ *
+ * @throws InvalidArgumentException
+ *    If the form state does not meet the criteria above.
+ */
+function entity_edit_lock_add_lock_setting_to_form(array &$form, FormStateInterface $form_state) {
+  $form_object = $form_state->getFormObject();
+  if (!$form_object instanceof EntityFormInterface) {
+    throw new InvalidArgumentException('Form must be an entity form.');
+  }
+
+  $entity = $form_object->getEntity();
+  if (!$entity instanceof ThirdPartySettingsInterface) {
+    throw new InvalidArgumentException('Form entity does not accept third party settings.');
+  }
+
+  if (!\Drupal::currentUser()->hasPermission('administer entity_edit_lock configuration')) {
+    return;
+  }
+
+  $form['lockable'] = [
+    '#type' => 'checkbox',
+    '#title' =>t('Allow edit lock.'),
+    '#default_value' => FALSE,
+  ];
+
+  $form['lockable']['#default_value'] = $entity->getThirdPartySetting('entity_edit_lock', 'lockable', FALSE);
+  $form['actions']['submit']['#submit'][] = 'entity_edit_lock_form_lockable_submit';
+}
+
+/**
+ * Form submission handler for entity settings forms.
+ *
+ * @param array $form
+ * @param FormStateInterface $form_state
+ */
+function entity_edit_lock_form_lockable_submit(array &$form, FormStateInterface $form_state) {
+  $lockable       = $form_state->getValue('lockable', FALSE);
+  $entity         = $form_state->getFormObject()->getEntity();
+  $bundle         = $entity->id();
+  $entity_type_id = $entity->getEntityType()->getBundleOf();
+  $field_name     = 'entity_edit_lock_locked';
+
+  if ($lockable) {
+    $field = FieldConfig::loadByName($entity_type_id, $bundle, $field_name);
+    if (!$field) {
+      $field_storage = FieldStorageConfig::loadByName($entity_type_id, $field_name);
+      if (!$field_storage) {
+        $field_storage = FieldStorageConfig::create([
+          'entity_type' => $entity_type_id,
+          'field_name' => $field_name,
+          'type' => 'boolean',
+          'locked' => TRUE,
+        ]);
+        $field_storage->save();
+      }
+      $field = FieldConfig::create([
+        'field_storage' => $field_storage,
+        'bundle' => $bundle,
+        'label' => t('Edit locked'),
+      ]);
+      $field->save();
+
+      \Drupal::logger('entity_edit_lock')->info(t('Entity edit lock field has been enabled on @bundle @type.', [
+        '@bundle' => $bundle,
+        '@type' => $entity_type_id,
+      ]));
+    }
+  } else if ($field = FieldConfig::loadByName($entity_type_id, $bundle, $field_name)) {
+    $field->delete();
+    \Drupal::messenger()->addWarning(t('Entity edit lock field has been deleted on $bundle @type', [
+      '@bundle' => $bundle,
+      '@type' => $entity_type_id,
+    ]));
+  }
+
+  $entity->setThirdPartySetting('entity_edit_lock', 'lockable', $lockable);
+  $entity->save();
+}

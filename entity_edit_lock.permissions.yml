@@ -1,0 +1,7 @@
+administer entity_edit_lock configuration:
+  title: 'Administer entity_edit_lock configuration'
+  description: 'Optional description.'
+  restrict access: true
+
+permission_callbacks:
+  - \Drupal\entity_edit_lock\EntityEditLockPermissions::entityTypePermissions

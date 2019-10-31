@@ -1,0 +1,6 @@
+name: 'Entity Edit Lock'
+type: module
+description: 'Allow users to lock entitied, preventing them from being modified.'
+package: Other
+core: 8.x
+core_version_requirement: ^8 || ^9

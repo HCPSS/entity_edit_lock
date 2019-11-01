@@ -3,19 +3,6 @@
 namespace Drupal\entity_edit_lock;
 
 use Drupal\Core\StringTranslation\StringTranslationTrait;
-use Drupal\paragraphs\Entity\ParagraphsType;
-use Drupal\Core\Entity\ContentEntityType;
-use Drupal\Core\Entity\EntityTypeRepositoryInterface;
-use Drupal\Core\Entity\EntityTypeManagerInterface;
-use Drupal\Core\Entity\EntityType;
-use Drupal\Core\Entity\ContentEntityTypeInterface;
-use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
-use Drupal\Core\Entity\EntityTypeBundleInfo;
-use Drupal\Core\Config\Entity\ConfigEntityBundleBase;
-use Drupal\node\Entity\NodeType;
-use Drupal\Core\Config\Entity\ConfigEntityType;
-use Drupal\eck\Entity\EckEntityType;
-use Drupal\Core\Entity\EntityTypeRepository;
 
 /**
  * Provides dynamic permissions for paragraphs of different types.
@@ -31,17 +18,23 @@ class EntityEditLockPermissions {
    *   The paragraph type permissions.
    */
   public function entityTypePermissions() {
-    $entityDefinitions = \Drupal::service('entity_type.manager')->getDefinitions();
-
     $perms = [];
-    foreach ($entityDefinitions as $definition) {
-      $types = $definition->getClass()::loadMultiple();
-      foreach ($types as $bundle => $type) {
-        if ($type instanceof ConfigEntityBundleBase && $type instanceof ThirdPartySettingsInterface) {
-          if ($type->getThirdPartySetting('entity_edit_lock', 'lockable', FALSE)) {
-            $perms += $this->buildPermissions($type);
-          }
-        }
+
+    $fids = \Drupal::entityQuery('field_config')
+      ->condition('field_name', 'entity_edit_lock_locked')
+      ->execute();
+
+    if (!empty($fids)) {
+      $fields = \Drupal::entityTypeManager()
+        ->getStorage('field_config')
+        ->loadMultiple($fids);
+
+      foreach ($fields as $field) {
+        /** @var \Drupal\field\Entity\FieldConfig $field */
+        $perms += $this->buildPermissions(
+          $field->getTargetEntityTypeId(),
+          $field->getTargetBundle()
+        );
       }
     }
 
@@ -51,16 +44,16 @@ class EntityEditLockPermissions {
   /**
    * Returns a list of paragraph permissions for the given paragraph type.
    *
-   * @param ContentEntityTypeInterface $type
-   *   The Entity type.
+   * @param string $entity_type_id
+   *   The Entity type id.
+   *
+   * @param string $bundle
+   *   The bundle.
    *
    * @return array
    *   An associative array of permission names and descriptions.
    */
-  protected function buildPermissions(ConfigEntityBundleBase $definition) {
-    $bundle = $definition->getConfigTarget();
-    $entity_type_id = $definition->getEntityType()->getBundleOf();
-
+  protected function buildPermissions($entity_type_id, $bundle) {
     $type_params = [
       '%entity_type_id' => $entity_type_id,
       '%bundle' => $bundle,

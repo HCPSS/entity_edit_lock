@@ -14,12 +14,8 @@ use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Entity\EntityFormInterface;
 use Drupal\Core\Config\Entity\ThirdPartySettingsInterface;
-use Composer\Installers\TheliaInstaller;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
-use Drupal\Core\Config\Entity\ConfigEntityInterface;
-use Drupal\Core\Entity\EntityTypeInterface;
-use Drupal\node\Entity\NodeType;
 
 /**
  * Implementation of hook_entity_field_access().

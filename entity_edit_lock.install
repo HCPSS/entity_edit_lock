@@ -1,0 +1,27 @@
+<?php
+
+/**
+ * Implements hook_uninstall().
+ */
+function entity_edit_lock_uninstall() {
+  $fids = \Drupal::entityQuery('field_config')
+    ->condition('field_name', 'entity_edit_lock_locked')
+    ->execute();
+
+
+  $entity_type_ids = [];
+  if (!empty($fids)) {
+    $fields = \Drupal::entityTypeManager()
+      ->getStorage('field_config')
+      ->loadMultiple($fids);
+
+    foreach ($fields as $field) {
+      $entity_type_id = $field->getTargetEntityTypeId();
+      if (!in_array($entity_type_id, $entity_type_ids)) {
+        $entity_type_ids[] = $entity_type_id;
+      }
+
+      $field->delete();
+    }
+  }
+}
